@@ -1,112 +1,118 @@
-# Project Setup Instructions
+# Hướng Dẫn Thiết Lập Dự Án
 
-## Prerequisites
+## Yêu Cầu Hệ Thống
 
-- Python 3.12 or higher
+- Python 3.12 hoặc cao hơn
 - Git
 
-## Setting Up the Development Environment
+## Thiết Lập Môi Trường Phát Triển
 
-### Installing uv
+### Cài Đặt uv
 
-`uv` is a fast Python package installer and resolver that we use for dependency management.
+`uv` là công cụ cài đặt và quản lý gói Python nhanh mà chúng ta sử dụng để quản lý các phụ thuộc.
 
-#### On macOS/Linux:
+#### Trên macOS/Linux:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-#### On Windows:
+#### Trên Windows:
 
 ```powershell
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-#### Verify installation:
+#### Kiểm tra cài đặt:
 
 ```bash
 uv --version
 ```
 
-### Installing Project Dependencies
+### Cài Đặt Các Gói Phụ Thuộc
 
-1. Clone this repository (if you haven't already):
+1. Sao chép kho lưu trữ (nếu bạn chưa làm):
 
    ```bash
    git clone <repository-url>
    cd csdldpt
    ```
 
-2. Create and activate a virtual environment using uv:
+2. Tạo và kích hoạt môi trường ảo bằng uv:
 
    ```bash
    uv venv
-   source .venv/bin/activate  # On Linux/macOS
-   # Or on Windows:
+   source .venv/bin/activate  # Trên Linux/macOS
+   # Hoặc trên Windows:
    # .venv\Scripts\activate
    ```
 
-3. Install dependencies from requirements.txt:
+3. Cài đặt các phụ thuộc từ requirements.txt:
    ```bash
    uv pip install -r requirements.txt
    ```
 
-## Running the Project
+## Chạy Dự Án
 
-The project is a leaf image similarity search system with three main operation modes:
+Dự án là một hệ thống tìm kiếm ảnh lá cây tương tự với ba chế độ hoạt động chính:
 
-### 1. Preprocessing Images
+### 1. Tiền Xử Lý Ảnh
 
-To preprocess raw images:
+Chạy lệnh sau để tiền xử lý tất cả ảnh:
 
 ```bash
 uv run python main.py --mode preprocess
 ```
 
-### 2. Building the Feature Database
+Lệnh này sẽ xử lý tất cả ảnh trong data/raw và lưu kết quả vào data/processed, giữ nguyên cấu trúc thư mục.
 
-To build the feature database:
+### 2. Xây Dựng Cơ Sở Dữ Liệu Đặc Trưng
+
+Để xây dựng cơ sở dữ liệu mà không sử dụng đặc trưng học sâu (nhanh hơn):
 
 ```bash
 uv run python main.py --mode train
 ```
 
-For using deep learning features (CNN):
+Hoặc để xây dựng cơ sở dữ liệu có sử dụng đặc trưng học sâu (chính xác hơn):
 
 ```bash
 uv run python main.py --mode train --use_deep
 ```
 
-### 3. Searching for Similar Images
+Quá trình này sẽ trích xuất đặc trưng từ tất cả ảnh đã xử lý và lưu vào models/feature_database.pkl.
 
-To search for images similar to a query image:
+### 3. Tìm Kiếm Ảnh Tương Tự
+
+Để tìm kiếm ảnh tương tự với một ảnh truy vấn:
 
 ```bash
 uv run python main.py --mode search --query test_images/test1.jpg
 ```
 
-For searching with deep learning features:
+Để sử dụng đặc trưng học sâu khi tìm kiếm (đảm bảo CSDL cũng được xây dựng với đặc trưng học sâu):
 
 ```bash
 uv run python main.py --mode search --query test_images/test1.jpg --use_deep
 ```
 
-To search for more than 3 similar images:
+Để tìm nhiều hơn 3 ảnh tương tự:
 
 ```bash
 uv run python main.py --mode search --query test_images/test1.jpg --top_k 5
 ```
 
-### 4. Run All Steps at Once
+Kết quả tìm kiếm sẽ được hiển thị trên màn hình và lưu vào thư mục results.
 
-To run preprocessing, database building, and search in one command:
+### 4. Chạy Tất Cả Các Bước Cùng Lúc
+
+Để chạy toàn bộ quy trình từ tiền xử lý đến tìm kiếm:
 
 ```bash
 uv run python main.py --mode all --query test_images/test1.jpg --use_deep
 ```
 
-### Additional Parameters
+### Các Tham Số Bổ Sung
 
-- `--top_k`: Number of similar images to return (default: 3)
-- `--result_dir`: Directory to save results (default: results)
+- `--top_k`: Số lượng ảnh tương tự muốn trả về (mặc định: 3)
+- `--result_dir`: Thư mục lưu kết quả (mặc định: results)

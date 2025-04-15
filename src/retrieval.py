@@ -1,6 +1,7 @@
 import pickle
 import numpy as np
 import cv2
+import os
 from sklearn.metrics.pairwise import cosine_similarity
 from .preprocess import preprocess_image
 from .feature_extraction import extract_all_features, load_deep_model
@@ -22,16 +23,15 @@ def find_similar_images(query_image_path, feature_database, top_k=3, use_deep_fe
     if use_deep_features:
         deep_model = load_deep_model()
     
-    # Tiền xử lý ảnh truy vấn
-    image = cv2.imread(query_image_path)
-    if image is None:
-        print(f"Không thể đọc ảnh truy vấn: {query_image_path}")
+    # Tiền xử lý ảnh truy vấn giống như các ảnh train
+    processed_img = preprocess_image(query_image_path)
+    
+    if processed_img is None:
+        print(f"Không thể xử lý ảnh truy vấn: {query_image_path}")
         return []
     
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
-    # Trích xuất đặc trưng từ ảnh truy vấn
-    query_features = extract_all_features(image_rgb, deep_model)
+    # Trích xuất đặc trưng từ ảnh truy vấn đã được tiền xử lý
+    query_features = extract_all_features(processed_img, deep_model)
     
     # Tính độ tương đồng với tất cả ảnh trong cơ sở dữ liệu
     database_features = feature_database['features']

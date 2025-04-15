@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
-from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
+from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input # type: ignore
 
 def extract_shape_features(binary_image):
     """Trích xuất đặc trưng hình dạng từ ảnh nhị phân"""
@@ -216,11 +216,11 @@ def extract_all_features(rgb_image, deep_model=None):
         
         # Kết hợp tất cả đặc trưng
         all_features = np.concatenate([
-            shape_feats * 0.2,        # Trọng số 20%
-            texture_feats * 0.2,      # Trọng số 20%
-            color_feats * 0.2,        # Trọng số 20%
-            vein_feats * 0.1,         # Trọng số 10%
-            deep_feats * 0.3          # Trọng số 30%
+            shape_feats * 0.25,        # Trọng số 25%
+            texture_feats * 0.15,      # Trọng số 15%
+            color_feats * 0.15,        # Trọng số 15%
+            vein_feats * 0.15,         # Trọng số 15%
+            deep_feats * 0.30          # Trọng số 30%
         ])
     else:
         # Nếu không có mô hình học sâu

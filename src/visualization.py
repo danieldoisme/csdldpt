@@ -14,7 +14,7 @@ def display_results(query_image_path, similar_images, save_path=None):
     query_img = cv2.cvtColor(query_img, cv2.COLOR_BGR2RGB)
     
     # Tạo figure với kích thước phù hợp
-    plt.figure(figsize=(15, 4))
+    plt.figure(figsize=(16, 5))
     
     # Hiển thị ảnh truy vấn
     plt.subplot(1, 4, 1)
@@ -38,11 +38,12 @@ def display_results(query_image_path, similar_images, save_path=None):
         plt.title(f"#{i+1}: {result['label']}\nĐộ tương đồng: {result['similarity']:.3f}")
         plt.axis('off')
     
-    plt.tight_layout()
+    # Thêm padding
+    plt.tight_layout(pad=2.0)
     
     # Lưu kết quả nếu cần
     if save_path:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=300, bbox_inches='tight', pad_inches=0.2)
         print(f"Đã lưu kết quả vào: {save_path}")
     
     # Hiển thị

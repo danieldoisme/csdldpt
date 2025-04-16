@@ -1,6 +1,6 @@
 import os
 import argparse
-from src.preprocess import preprocess_all_images_improved
+from src.preprocess import preprocess_all_images_simple
 from src.database import build_feature_database_improved
 from src.retrieval import load_feature_database, find_similar_images_improved
 from src.visualization import display_results, create_result_folder
@@ -38,7 +38,7 @@ def main():
     # Chạy theo chế độ được chọn
     if args.mode in ['preprocess', 'all']:
         print("=== Bắt đầu tiền xử lý dữ liệu ===")
-        preprocess_all_images_improved(args.raw_data, args.processed_data)
+        preprocess_all_images_simple(args.raw_data, args.processed_data)
     
     if args.mode in ['train', 'all']:
         print("=== Bắt đầu xây dựng cơ sở dữ liệu đặc trưng ===")
@@ -55,18 +55,32 @@ def main():
             print("Không tìm thấy cơ sở dữ liệu. Hãy chạy với --mode train để xây dựng CSDL trước.")
             return
         
-        # Định nghĩa trọng số cho từng loại đặc trưng
+        # Định nghĩa trọng số cho từng loại đặc trưng (đơn giản hóa)
         feature_weights = {
-            'shape': 0.40,     # Hình dạng
-            'texture': 0.10,   # Kết cấu
-            'color': 0.15,     # Màu sắc
-            'vein': 0.30,      # Gân lá
-            'deep': 0.05       # Đặc trưng học sâu
+            'shape': 0.45,     # Hình dạng - tăng lên
+            'texture': 0.15,   # Kết cấu
+            'color': 0.25,     # Màu sắc - tăng lên  
+            'vein': 0.15       # Gân lá - giảm xuống
         }
         
-        # Tìm kiếm ảnh tương tự với phương pháp cải tiến
+        if args.use_deep:
+            feature_weights['deep'] = 0.30  # Đặc trưng học sâu - tăng lên
+            # Điều chỉnh lại trọng số khác
+            feature_weights['shape'] = 0.30
+            feature_weights['color'] = 0.20
+            feature_weights['texture'] = 0.10
+            feature_weights['vein'] = 0.10
+        
+        # Tiền xử lý ảnh truy vấn
+        from src.preprocess import preprocess_image_simple
+        import os
+        query_filename = os.path.basename(args.query)
+        query_processed = os.path.join(args.result_dir, f"query_processed_{query_filename}")
+        preprocess_image_simple(args.query, query_processed)
+        
+        # Tìm kiếm ảnh tương tự
         similar_images = find_similar_images_improved(
-            args.query, 
+            query_processed, 
             feature_database, 
             top_k=args.top_k,
             use_deep_features=args.use_deep,

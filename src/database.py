@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 import cv2
 from tqdm import tqdm
-from .preprocess import preprocess_image_improved as preprocess_image
+from .preprocess import preprocess_image_simple as preprocess_image
 from .feature_extraction import extract_all_features, load_deep_model
 
 def compute_feature_lengths(image_rgb, deep_model=None, model_type='resnet'):

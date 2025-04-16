@@ -1,8 +1,7 @@
 import os
 import cv2
-import tqdm
+from tqdm import tqdm
 import numpy as np
-from skimage import exposure
 
 def create_directories(directory):
     """Tạo thư mục nếu chưa tồn tại"""
@@ -116,51 +115,38 @@ def extract_leaf_vein_mask(gray_image, mask):
     
     return vein_mask
 
-def preprocess_image_improved(image_path, output_path=None, target_size=(224, 224)):
-    """Tiền xử lý ảnh với các cải tiến"""
+def preprocess_image_simple(image_path, output_path=None, target_size=(224, 224)):
+    """Tiền xử lý ảnh với phương pháp đơn giản nhưng ổn định"""
     # Đọc ảnh
     image = cv2.imread(image_path)
     if image is None:
         print(f"Không thể đọc ảnh: {image_path}")
         return None
     
-    # Chuẩn hóa ảnh để giảm ảnh hưởng của điều kiện ánh sáng
-    image = normalize_image(image)
-    
-    # Chuyển sang RGB và lưu lại ảnh gốc cho các bước xử lý sau
+    # Chuyển sang RGB
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     
-    # Chuyển sang không gian màu LAB
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
+    # Chuyển sang HSV để phân đoạn lá dễ dàng hơn
+    hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
     
-    # Tạo mask lá cây sử dụng kết hợp kênh a và b
-    # Kênh a phân biệt màu xanh-đỏ, kênh b phân biệt màu xanh-vàng
-    green_mask = cv2.subtract(b, a)  # Tạo mask nhấn mạnh màu xanh lá
+    # Tạo mask cho lá cây (màu xanh lá trong không gian màu HSV)
+    # Dải màu xanh lá trong HSV
+    lower_green = np.array([25, 40, 40])
+    upper_green = np.array([90, 255, 255])
     
-    # Làm mịn mask với bộ lọc Gaussian
-    blurred_green = cv2.GaussianBlur(green_mask, (5, 5), 0)
+    # Tạo mask
+    mask = cv2.inRange(hsv, lower_green, upper_green)
     
-    # Áp dụng phân ngưỡng Otsu
-    _, binary_otsu = cv2.threshold(blurred_green, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    # Cải thiện mask với xử lý hình thái học
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     
-    # Thêm phân ngưỡng thích ứng để nắm bắt chi tiết
-    binary_adaptive = cv2.adaptiveThreshold(
-        blurred_green, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
-    
-    # Kết hợp hai phương pháp
-    binary = cv2.bitwise_or(binary_otsu, binary_adaptive)
-    
-    # Áp dụng các phép toán hình thái học để cải thiện mask
-    kernel = np.ones((3, 3), np.uint8)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=3)
-    
-    # Tìm contour
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Tìm contour lớn nhất
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
-        print(f"Không tìm thấy lá trong ảnh: {image_path}")
+        print(f"Không phát hiện lá trong ảnh: {image_path}")
         resized = cv2.resize(image_rgb, target_size)
         if output_path:
             cv2.imwrite(output_path, cv2.cvtColor(resized, cv2.COLOR_RGB2BGR))
@@ -170,29 +156,25 @@ def preprocess_image_improved(image_path, output_path=None, target_size=(224, 22
     largest_contour = max(contours, key=cv2.contourArea)
     
     # Tạo mask từ contour
-    mask = np.zeros_like(l)
-    cv2.drawContours(mask, [largest_contour], 0, 255, -1)
+    refined_mask = np.zeros_like(mask)
+    cv2.drawContours(refined_mask, [largest_contour], 0, 255, -1)
     
-    # Chuyển sang ảnh xám cho việc xử lý chi tiết
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # Áp dụng mask để lấy chỉ lá
+    result = cv2.bitwise_and(image_rgb, image_rgb, mask=refined_mask)
     
-    # Bảo toàn chi tiết gân lá và biên với phương pháp cải tiến
-    mask = preserve_details_improved(mask, gray)
+    # Tạo background trắng
+    white_bg = np.ones_like(image_rgb) * 255
+    inv_mask = cv2.bitwise_not(refined_mask)
+    background = cv2.bitwise_and(white_bg, white_bg, mask=inv_mask)
     
-    # Trích xuất mask gân lá riêng để sử dụng sau này
-    vein_mask = extract_leaf_vein_mask(gray, mask)
-    
-    # Loại bỏ bóng và nâng cao chất lượng ảnh
-    result = remove_shadow_improved(image, mask)
-    
-    # Tăng cường chi tiết gân lá
-    result = enhance_leaf_details(result, mask)
+    # Kết hợp lá với background trắng
+    result = cv2.add(result, background)
     
     # Cắt ra vùng chứa lá
     x, y, w, h = cv2.boundingRect(largest_contour)
     
     # Mở rộng vùng cắt để đảm bảo không mất chi tiết
-    padding = 10  # Tăng padding từ 5 lên 10
+    padding = 10
     x = max(0, x - padding)
     y = max(0, y - padding)
     w = min(result.shape[1] - x, w + 2*padding)
@@ -200,13 +182,13 @@ def preprocess_image_improved(image_path, output_path=None, target_size=(224, 22
     roi = result[y:y+h, x:x+w]
     
     # Thay đổi kích thước
-    resized = cv2.resize(roi, target_size, interpolation=cv2.INTER_AREA)  # INTER_AREA tốt hơn cho giảm kích thước
+    resized = cv2.resize(roi, target_size, interpolation=cv2.INTER_AREA)
     
     # Lưu ảnh nếu cần
     if output_path:
-        cv2.imwrite(output_path, resized)
+        cv2.imwrite(output_path, cv2.cvtColor(resized, cv2.COLOR_RGB2BGR))
     
-    return cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    return resized
 
 def preserve_details_improved(mask, original_gray):
     """Cải tiến thuật toán bảo toàn chi tiết"""
@@ -238,13 +220,13 @@ def preserve_details_improved(mask, original_gray):
     
     return final_mask
 
-def preprocess_all_images_improved(raw_data_dir, processed_data_dir):
-    """Tiền xử lý tất cả ảnh trong thư mục với phương pháp cải tiến"""
+def preprocess_all_images_simple(raw_data_dir, processed_data_dir):
+    """Tiền xử lý tất cả ảnh trong thư mục với phương pháp đơn giản"""
     # Tạo thư mục đầu ra nếu chưa tồn tại
     if not os.path.exists(processed_data_dir):
         os.makedirs(processed_data_dir)
     
-    # Duyệt qua tất cả các thư mục con (mỗi thư mục là một loại lá)
+    # Duyệt qua tất cả các thư mục con
     for class_name in os.listdir(raw_data_dir):
         class_dir = os.path.join(raw_data_dir, class_name)
         
@@ -260,7 +242,7 @@ def preprocess_all_images_improved(raw_data_dir, processed_data_dir):
             image_files = [f for f in os.listdir(class_dir) 
                            if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
             
-            for img_file in tqdm(image_files, desc=f"Xử lý {class_name}"):
+            for img_file in tqdm.tqdm(image_files, desc=f"Xử lý {class_name}"):
                 # Đường dẫn đầy đủ đến ảnh
                 img_path = os.path.join(class_dir, img_file)
                 
@@ -269,7 +251,7 @@ def preprocess_all_images_improved(raw_data_dir, processed_data_dir):
                 
                 # Tiền xử lý ảnh
                 try:
-                    preprocess_image_improved(img_path, output_path)
+                    preprocess_image_simple(img_path, output_path)
                 except Exception as e:
                     print(f"Lỗi khi xử lý {img_path}: {e}")
     

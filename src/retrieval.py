@@ -3,8 +3,7 @@ import numpy as np
 import cv2
 import os
 from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
-from sklearn.preprocessing import normalize
-from .preprocess import preprocess_image_improved as preprocess_image
+from .preprocess import preprocess_image_simple as preprocess_image
 from .feature_extraction import extract_all_features, load_deep_model
 
 def load_feature_database(database_file):

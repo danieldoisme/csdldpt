@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import cv2
-import numpy as np
 import os
 
 def display_results(query_image_path, similar_images, save_path=None):

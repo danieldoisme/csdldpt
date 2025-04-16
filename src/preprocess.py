@@ -1,5 +1,6 @@
 import os
 import cv2
+import tqdm
 import numpy as np
 from skimage import exposure
 
@@ -236,3 +237,40 @@ def preserve_details_improved(mask, original_gray):
     final_mask = cv2.medianBlur(final_mask, 3)
     
     return final_mask
+
+def preprocess_all_images_improved(raw_data_dir, processed_data_dir):
+    """Tiền xử lý tất cả ảnh trong thư mục với phương pháp cải tiến"""
+    # Tạo thư mục đầu ra nếu chưa tồn tại
+    if not os.path.exists(processed_data_dir):
+        os.makedirs(processed_data_dir)
+    
+    # Duyệt qua tất cả các thư mục con (mỗi thư mục là một loại lá)
+    for class_name in os.listdir(raw_data_dir):
+        class_dir = os.path.join(raw_data_dir, class_name)
+        
+        if os.path.isdir(class_dir):
+            # Tạo thư mục đầu ra cho loại lá này
+            output_class_dir = os.path.join(processed_data_dir, class_name)
+            if not os.path.exists(output_class_dir):
+                os.makedirs(output_class_dir)
+            
+            print(f"Đang tiền xử lý ảnh lá loại {class_name}...")
+            
+            # Duyệt qua tất cả ảnh trong thư mục
+            image_files = [f for f in os.listdir(class_dir) 
+                           if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+            
+            for img_file in tqdm(image_files, desc=f"Xử lý {class_name}"):
+                # Đường dẫn đầy đủ đến ảnh
+                img_path = os.path.join(class_dir, img_file)
+                
+                # Đường dẫn đầu ra
+                output_path = os.path.join(output_class_dir, img_file)
+                
+                # Tiền xử lý ảnh
+                try:
+                    preprocess_image_improved(img_path, output_path)
+                except Exception as e:
+                    print(f"Lỗi khi xử lý {img_path}: {e}")
+    
+    print(f"Đã hoàn thành tiền xử lý cho {len(os.listdir(raw_data_dir))} loại lá.")

@@ -1,103 +1,134 @@
 import os
 import argparse
-from src.preprocess import preprocess_all_images_simple
-from src.database import build_feature_database_improved
-from src.retrieval import load_feature_database, find_similar_images_improved
-from src.visualization import display_results, create_result_folder
+import time
+import cv2
+import numpy as np
+from tqdm import tqdm
+
+from src.preprocess import preprocess_image, batch_process
+from src.feature_extraction import extract_features, process_directory
+from src.database import LeafDatabase
+from src.retrieval import LeafRetrieval
+from src.visualization import create_result_visualization, create_preprocessing_visualization, create_feature_visualization
+
+def preprocess_data(input_dir="data/raw", output_dir="data/processed"):
+    """Preprocess all leaf images"""
+    print("Starting preprocessing...")
+    
+    # Start time
+    start_time = time.time()
+    
+    # Process all images
+    batch_process(input_dir, output_dir)
+    
+    # End time
+    elapsed_time = time.time() - start_time
+    print(f"Preprocessing completed in {elapsed_time:.2f} seconds.")
+
+def build_database(input_dir="data/processed", output_path="models/feature_database.pkl"):
+    """Build database from processed images"""
+    print("Building database...")
+    
+    # Start time
+    start_time = time.time()
+    
+    # Create and build database
+    db = LeafDatabase()
+    db.build_from_directory(input_dir)
+    
+    # Save database
+    db.save(output_path)
+    
+    # End time
+    elapsed_time = time.time() - start_time
+    print(f"Database built in {elapsed_time:.2f} seconds with {db.size()} images.")
+    
+    return db
+
+def retrieve_similar(query_image, database_path="models/feature_database.pkl", output_dir="results", n=3, metric="euclidean"):
+    """Retrieve similar images to a query image"""
+    # Load database
+    db = LeafDatabase()
+    db.load(database_path)
+    
+    # Create retrieval system
+    retrieval = LeafRetrieval(db)
+    
+    # Determine output path
+    query_filename = os.path.basename(query_image)
+    output_path = os.path.join(output_dir, f"result_{os.path.splitext(query_filename)[0]}.png")
+    
+    # Retrieve similar images
+    start_time = time.time()
+    
+    if metric == "ensemble":
+        results = retrieval.retrieve_with_multiple_metrics(query_image, n=n)
+    else:
+        results = retrieval.retrieve_similar_images(query_image, n=n, metric=metric)
+    
+    elapsed_time = time.time() - start_time
+    
+    # Display results
+    print(f"Retrieval completed in {elapsed_time:.2f} seconds.")
+    print(f"Query image: {query_image}")
+    
+    for i, result in enumerate(results):
+        similarity_percent = result['similarity'] * 100
+        print(f"Result {i+1}: {result['path']} ({result['label']}) - Similarity: {similarity_percent:.1f}%")
+    
+    # Create visualization
+    create_result_visualization(query_image, results, output_path, show=False)
+    print(f"Result visualization saved to {output_path}")
+    
+    return results, output_path
+
+def process_test_images(test_dir="test_images", database_path="models/feature_database.pkl", output_dir="results", n=3, metric="euclidean"):
+    """Process all test images in a directory"""
+    # Get all test images
+    test_images = []
+    for file in os.listdir(test_dir):
+        if file.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
+            test_images.append(os.path.join(test_dir, file))
+    
+    # Process each test image
+    for i, test_image in enumerate(test_images):
+        print(f"\nProcessing test image {i+1}/{len(test_images)}: {test_image}")
+        retrieve_similar(test_image, database_path, output_dir, n, metric)
 
 def main():
-    # Phân tích tham số dòng lệnh
-    parser = argparse.ArgumentParser(description='Hệ thống tìm kiếm ảnh lá cây')
-    parser.add_argument('--mode', type=str, default='search', 
-                       choices=['preprocess', 'train', 'search', 'all'],
-                       help='Chế độ chạy: preprocess (tiền xử lý), train (xây dựng CSDL), search (tìm kiếm), all (tất cả các bước)')
-    parser.add_argument('--raw_data', type=str, default='data/raw',
-                       help='Thư mục chứa dữ liệu gốc')
-    parser.add_argument('--processed_data', type=str, default='data/processed',
-                       help='Thư mục lưu dữ liệu đã xử lý')
-    parser.add_argument('--database', type=str, default='models/feature_database.pkl',
-                       help='Đường dẫn tới file cơ sở dữ liệu')
-    parser.add_argument('--query', type=str, default='test_images/test1.jpg',
-                       help='Đường dẫn tới ảnh truy vấn')
-    parser.add_argument('--top_k', type=int, default=3,
-                       help='Số lượng ảnh tương tự muốn tìm')
-    parser.add_argument('--use_deep', action='store_true',
-                       help='Sử dụng đặc trưng học sâu (CNN)')
-    parser.add_argument('--model_type', type=str, default='resnet', choices=['resnet', 'efficientnet'],
-                       help='Loại mô hình CNN sử dụng cho trích xuất đặc trưng học sâu')
-    parser.add_argument('--result_dir', type=str, default='results',
-                       help='Thư mục lưu kết quả')
+    # Command line arguments
+    parser = argparse.ArgumentParser(description="Leaf Image Retrieval System")
+    parser.add_argument("--preprocess", action="store_true", help="Preprocess raw images")
+    parser.add_argument("--build", action="store_true", help="Build feature database")
+    parser.add_argument("--retrieve", action="store_true", help="Retrieve similar images")
+    parser.add_argument("--test_all", action="store_true", help="Test all images in test directory")
+    parser.add_argument("--query", type=str, help="Query image path")
+    parser.add_argument("--n", type=int, default=3, help="Number of similar images to retrieve")
+    parser.add_argument("--metric", type=str, default="euclidean", choices=["euclidean", "cosine", "chi_square", "manhattan", "ensemble"], help="Distance metric to use")
     
     args = parser.parse_args()
     
-    # Tạo các thư mục cần thiết
-    os.makedirs('models', exist_ok=True)
-    os.makedirs('test_images', exist_ok=True)
-    create_result_folder(args.result_dir)
+    # Create required directories
+    os.makedirs("data/processed", exist_ok=True)
+    os.makedirs("models", exist_ok=True)
+    os.makedirs("results", exist_ok=True)
     
-    # Chạy theo chế độ được chọn
-    if args.mode in ['preprocess', 'all']:
-        print("=== Bắt đầu tiền xử lý dữ liệu ===")
-        preprocess_all_images_simple(args.raw_data, args.processed_data)
+    # Execute requested operations
+    if args.preprocess:
+        preprocess_data()
     
-    if args.mode in ['train', 'all']:
-        print("=== Bắt đầu xây dựng cơ sở dữ liệu đặc trưng ===")
-        build_feature_database_improved(args.processed_data, args.database, 
-                                       use_deep_features=args.use_deep, 
-                                       model_type=args.model_type)
+    if args.build:
+        build_database()
     
-    if args.mode in ['search', 'all']:
-        print("=== Bắt đầu tìm kiếm ảnh tương tự ===")
-        
-        # Tải cơ sở dữ liệu
-        feature_database = load_feature_database(args.database)
-        if feature_database is None:
-            print("Không tìm thấy cơ sở dữ liệu. Hãy chạy với --mode train để xây dựng CSDL trước.")
-            return
-        
-        # Định nghĩa trọng số cho từng loại đặc trưng (đơn giản hóa)
-        feature_weights = {
-            'shape': 0.45,     # Hình dạng - tăng lên
-            'texture': 0.15,   # Kết cấu
-            'color': 0.25,     # Màu sắc - tăng lên  
-            'vein': 0.15       # Gân lá - giảm xuống
-        }
-        
-        if args.use_deep:
-            feature_weights['deep'] = 0.30  # Đặc trưng học sâu - tăng lên
-            # Điều chỉnh lại trọng số khác
-            feature_weights['shape'] = 0.30
-            feature_weights['color'] = 0.20
-            feature_weights['texture'] = 0.10
-            feature_weights['vein'] = 0.10
-        
-        # Tiền xử lý ảnh truy vấn
-        from src.preprocess import preprocess_image_simple
-        import os
-        query_filename = os.path.basename(args.query)
-        query_processed = os.path.join(args.result_dir, f"query_processed_{query_filename}")
-        preprocess_image_simple(args.query, query_processed)
-        
-        # Tìm kiếm ảnh tương tự
-        similar_images = find_similar_images_improved(
-            query_processed, 
-            feature_database, 
-            top_k=args.top_k,
-            use_deep_features=args.use_deep,
-            model_type=args.model_type,
-            feature_weights=feature_weights
-        )
-        
-        # Hiển thị kết quả
-        if similar_images:
-            # Tạo tên file kết quả
-            query_name = os.path.splitext(os.path.basename(args.query))[0]
-            result_path = os.path.join(args.result_dir, f"result_{query_name}.png")
-            
-            # Hiển thị và lưu kết quả
-            display_results(args.query, similar_images, save_path=result_path)
-        else:
-            print("Không tìm thấy ảnh tương tự.")
+    if args.retrieve and args.query:
+        retrieve_similar(args.query, n=args.n, metric=args.metric)
+    
+    if args.test_all:
+        process_test_images(n=args.n, metric=args.metric)
+    
+    # If no arguments, show help
+    if not (args.preprocess or args.build or args.retrieve or args.test_all):
+        parser.print_help()
 
 if __name__ == "__main__":
     main()

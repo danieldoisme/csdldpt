@@ -1,258 +1,170 @@
-import os
 import cv2
-from tqdm import tqdm
 import numpy as np
+import os
+from tqdm import tqdm
 
-def create_directories(directory):
-    """Tạo thư mục nếu chưa tồn tại"""
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+def remove_background(image):
+    """Remove background from leaf image using GrabCut algorithm"""
+    # Convert to RGB if in BGR format
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    else:
+        img = image.copy()
+    
+    # Create initial mask
+    mask = np.zeros(img.shape[:2], np.uint8)
+    
+    # Set rectangular ROI based on finding leaf contours
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    
+    # Find contours of the leaf
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if len(contours) > 0:
+        # Use the largest contour for the rectangular ROI
+        max_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(max_contour)
+        
+        # Create a tighter rectangle for GrabCut
+        rect = (x, y, w, h)
+        
+        # Initialize GrabCut's mask
+        bgdModel = np.zeros((1, 65), np.float64)
+        fgdModel = np.zeros((1, 65), np.float64)
+        
+        # Apply GrabCut
+        cv2.grabCut(img, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
+        
+        # Create mask where definite and probable foreground are set to 1
+        mask2 = np.where((mask == 2) | (mask == 0), 0, 1).astype('uint8')
+        
+        # Create the resulting image
+        result = img * mask2[:, :, np.newaxis]
+        
+        # Create white background
+        white_background = np.ones_like(img) * 255
+        background_area = np.where((mask2[:, :, np.newaxis] == 0), white_background, result)
+        
+        return background_area
+    
+    return img
 
-def normalize_image(image):
-    """Chuẩn hóa ảnh để giảm ảnh hưởng của điều kiện ánh sáng"""
-    # Chuẩn hóa từng kênh màu riêng biệt
-    normalized = np.zeros_like(image, dtype=np.float32)
-    for i in range(3):
-        channel = image[:,:,i].astype(np.float32)
-        if np.max(channel) > np.min(channel):
-            normalized[:,:,i] = (channel - np.min(channel)) / (np.max(channel) - np.min(channel))
+def enhance_leaf_details(image):
+    """Enhance leaf details like veins and edges"""
+    # Convert to grayscale
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
     
-    # Chuyển về dạng uint8
-    normalized = (normalized * 255).astype(np.uint8)
-    return normalized
-
-def remove_shadow_improved(image, mask):
-    """Cải tiến thuật toán loại bỏ bóng"""
-    # Chuyển sang không gian màu HSV
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
-    
-    # Điều chỉnh độ sáng để giảm bóng với CLAHE cải tiến
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    v = clahe.apply(v)
-    
-    # Giảm bão hòa của vùng tối
-    s_adjusted = s.copy()
-    dark_regions = (v < 128)
-    s_adjusted[dark_regions] = s_adjusted[dark_regions] * 0.7  # Giảm độ bão hòa ở vùng tối
-    
-    # Tái tạo ảnh sau khi đã điều chỉnh
-    hsv_enhanced = cv2.merge([h, s_adjusted, v])
-    enhanced = cv2.cvtColor(hsv_enhanced, cv2.COLOR_HSV2BGR)
-    
-    # Áp dụng mặt nạ để loại bỏ hoàn toàn nền
-    result = cv2.bitwise_and(enhanced, enhanced, mask=mask)
-    
-    # Tạo nền trắng thay vì nền đen
-    background = np.ones_like(image, np.uint8) * 255
-    mask_inv = cv2.bitwise_not(mask)
-    background = cv2.bitwise_and(background, background, mask=mask_inv)
-    
-    # Kết hợp ảnh lá với nền trắng
-    final = cv2.add(result, background)
-    
-    return final
-
-def enhance_leaf_details(image, mask):
-    """Tăng cường chi tiết của lá"""
-    # Áp dụng bộ lọc làm sắc nét
-    kernel_sharpen = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-    sharpened = cv2.filter2D(image, -1, kernel_sharpen)
-    
-    # Tăng cường độ tương phản cho vùng lá
-    lab = cv2.cvtColor(sharpened, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    
-    # Áp dụng CLAHE chỉ trên kênh độ sáng
+    # Apply CLAHE for enhanced contrast
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
+    enhanced = clahe.apply(gray)
     
-    # Tái tạo ảnh
-    enhanced_lab = cv2.merge([l, a, b])
-    enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
-    
-    # Áp dụng chỉ trong vùng lá
-    result = cv2.bitwise_and(enhanced, enhanced, mask=mask)
-    
-    # Kết hợp với phần nền
-    background = cv2.bitwise_and(image, image, mask=cv2.bitwise_not(mask))
-    final = cv2.add(result, background)
-    
-    return final
-
-def extract_leaf_vein_mask(gray_image, mask):
-    """Trích xuất một mask riêng cho gân lá"""
-    # Cải thiện độ tương phản cho ảnh xám
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray_image)
-    
-    # Áp dụng bộ lọc làm nổi bật gân lá
-    kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+    # Sharpen the image to enhance leaf veins and edges
+    kernel = np.array([[-1, -1, -1],
+                       [-1,  9, -1],
+                       [-1, -1, -1]])
     sharpened = cv2.filter2D(enhanced, -1, kernel)
     
-    # Áp dụng bộ lọc Gabor để phát hiện gân lá theo các hướng khác nhau
-    gabor_responses = []
-    for theta in np.arange(0, np.pi, np.pi/4):
-        kern = cv2.getGaborKernel((15, 15), 4.0, theta, 10.0, 0.5, 0, ktype=cv2.CV_32F)
-        filtered = cv2.filter2D(sharpened, cv2.CV_8UC3, kern)
-        gabor_responses.append(filtered)
+    # Return as RGB if input was RGB
+    if len(image.shape) == 3:
+        sharpened_rgb = cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+        return sharpened_rgb
     
-    # Kết hợp các phản hồi của bộ lọc Gabor
-    vein_response = np.zeros_like(gray_image)
-    for response in gabor_responses:
-        vein_response = cv2.max(vein_response, response)
-    
-    # Áp dụng phân ngưỡng thích ứng
-    vein_binary = cv2.adaptiveThreshold(vein_response, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                        cv2.THRESH_BINARY_INV, 11, 2)
-    
-    # Chỉ giữ lại vein trong vùng lá
-    vein_mask = cv2.bitwise_and(vein_binary, vein_binary, mask=mask)
-    
-    # Áp dụng phép mở để loại bỏ nhiễu
-    kernel = np.ones((2, 2), np.uint8)
-    vein_mask = cv2.morphologyEx(vein_mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    
-    return vein_mask
+    return sharpened
 
-def preprocess_image_simple(image_path, output_path=None, target_size=(224, 224)):
-    """Tiền xử lý ảnh với phương pháp đơn giản nhưng ổn định"""
-    # Đọc ảnh
+def resize_image(image, target_size=(256, 256)):
+    """Resize image to target size while maintaining aspect ratio"""
+    h, w = image.shape[:2]
+    
+    # Calculate aspect ratio and resize
+    aspect = w / h
+    
+    if aspect > 1:  # Width is larger
+        new_w = target_size[0]
+        new_h = int(new_w / aspect)
+    else:  # Height is larger or equal
+        new_h = target_size[1]
+        new_w = int(new_h * aspect)
+    
+    # Resize image
+    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    
+    # Create canvas of target size with white background
+    canvas = np.ones((target_size[1], target_size[0], 3), dtype=np.uint8) * 255
+    
+    # Center the image on the canvas
+    y_offset = (target_size[1] - new_h) // 2
+    x_offset = (target_size[0] - new_w) // 2
+    
+    # Place the resized image on the canvas
+    if len(resized.shape) == 3:
+        canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+    else:
+        canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = cv2.cvtColor(resized, cv2.COLOR_GRAY2BGR)
+    
+    return canvas
+
+def preprocess_image(image_path, output_path=None):
+    """Full preprocessing pipeline for a single image"""
+    # Read image
     image = cv2.imread(image_path)
+    
     if image is None:
-        print(f"Không thể đọc ảnh: {image_path}")
-        return None
+        raise ValueError(f"Could not read image: {image_path}")
     
-    # Chuyển sang RGB
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # Resize to 256x256
+    image = resize_image(image)
     
-    # Chuyển sang HSV để phân đoạn lá dễ dàng hơn
-    hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
+    # Remove background
+    image = remove_background(image)
     
-    # Tạo mask cho lá cây (màu xanh lá trong không gian màu HSV)
-    # Dải màu xanh lá trong HSV
-    lower_green = np.array([25, 40, 40])
-    upper_green = np.array([90, 255, 255])
+    # Enhance leaf details
+    enhanced_image = enhance_leaf_details(image)
     
-    # Tạo mask
-    mask = cv2.inRange(hsv, lower_green, upper_green)
-    
-    # Cải thiện mask với xử lý hình thái học
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    
-    # Tìm contour lớn nhất
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if not contours:
-        print(f"Không phát hiện lá trong ảnh: {image_path}")
-        resized = cv2.resize(image_rgb, target_size)
-        if output_path:
-            cv2.imwrite(output_path, cv2.cvtColor(resized, cv2.COLOR_RGB2BGR))
-        return resized
-    
-    # Lấy contour lớn nhất
-    largest_contour = max(contours, key=cv2.contourArea)
-    
-    # Tạo mask từ contour
-    refined_mask = np.zeros_like(mask)
-    cv2.drawContours(refined_mask, [largest_contour], 0, 255, -1)
-    
-    # Áp dụng mask để lấy chỉ lá
-    result = cv2.bitwise_and(image_rgb, image_rgb, mask=refined_mask)
-    
-    # Tạo background trắng
-    white_bg = np.ones_like(image_rgb) * 255
-    inv_mask = cv2.bitwise_not(refined_mask)
-    background = cv2.bitwise_and(white_bg, white_bg, mask=inv_mask)
-    
-    # Kết hợp lá với background trắng
-    result = cv2.add(result, background)
-    
-    # Cắt ra vùng chứa lá
-    x, y, w, h = cv2.boundingRect(largest_contour)
-    
-    # Mở rộng vùng cắt để đảm bảo không mất chi tiết
-    padding = 10
-    x = max(0, x - padding)
-    y = max(0, y - padding)
-    w = min(result.shape[1] - x, w + 2*padding)
-    h = min(result.shape[0] - y, h + 2*padding)
-    roi = result[y:y+h, x:x+w]
-    
-    # Thay đổi kích thước
-    resized = cv2.resize(roi, target_size, interpolation=cv2.INTER_AREA)
-    
-    # Lưu ảnh nếu cần
+    # Save if output path is provided
     if output_path:
-        cv2.imwrite(output_path, cv2.cvtColor(resized, cv2.COLOR_RGB2BGR))
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        cv2.imwrite(output_path, enhanced_image)
     
-    return resized
+    return enhanced_image
 
-def preserve_details_improved(mask, original_gray):
-    """Cải tiến thuật toán bảo toàn chi tiết"""
-    # Phát hiện cạnh từ ảnh gốc với nhiều phương pháp
-    edges_canny = cv2.Canny(original_gray, 40, 140)
+def batch_process(input_dir, output_dir):
+    """Process all leaf images in a directory"""
+    # Create output directory if not exists
+    os.makedirs(output_dir, exist_ok=True)
     
-    # Phát hiện cạnh bằng Sobel
-    sobelx = cv2.Sobel(original_gray, cv2.CV_64F, 1, 0, ksize=3)
-    sobely = cv2.Sobel(original_gray, cv2.CV_64F, 0, 1, ksize=3)
-    sobel_edges = cv2.magnitude(sobelx, sobely)
-    sobel_edges = cv2.normalize(sobel_edges, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    _, sobel_binary = cv2.threshold(sobel_edges, 40, 255, cv2.THRESH_BINARY)
+    # Get all image files
+    image_files = []
+    for root, _, files in os.walk(input_dir):
+        for file in files:
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
+                image_files.append(os.path.join(root, file))
     
-    # Kết hợp các phương pháp phát hiện cạnh
-    combined_edges = cv2.bitwise_or(edges_canny, sobel_binary)
+    print(f"Found {len(image_files)} images to process.")
     
-    # Mở rộng mask một chút để bao gồm các chi tiết biên
-    kernel = np.ones((5, 5), np.uint8)
-    dilated_mask = cv2.dilate(mask, kernel, iterations=1)
-    
-    # Kết hợp các cạnh phát hiện được với mask
-    edge_mask = cv2.bitwise_and(combined_edges, combined_edges, mask=dilated_mask)
-    
-    # Thêm các chi tiết cạnh vào mask
-    final_mask = cv2.bitwise_or(mask, edge_mask)
-    
-    # Làm mịn mask cuối cùng để loại bỏ nhiễu
-    final_mask = cv2.medianBlur(final_mask, 3)
-    
-    return final_mask
-
-def preprocess_all_images_simple(raw_data_dir, processed_data_dir):
-    """Tiền xử lý tất cả ảnh trong thư mục với phương pháp đơn giản"""
-    # Tạo thư mục đầu ra nếu chưa tồn tại
-    if not os.path.exists(processed_data_dir):
-        os.makedirs(processed_data_dir)
-    
-    # Duyệt qua tất cả các thư mục con
-    for class_name in os.listdir(raw_data_dir):
-        class_dir = os.path.join(raw_data_dir, class_name)
+    # Process each image
+    for img_path in tqdm(image_files, desc="Processing images"):
+        # Construct output path
+        rel_path = os.path.relpath(img_path, input_dir)
+        out_path = os.path.join(output_dir, rel_path)
         
-        if os.path.isdir(class_dir):
-            # Tạo thư mục đầu ra cho loại lá này
-            output_class_dir = os.path.join(processed_data_dir, class_name)
-            if not os.path.exists(output_class_dir):
-                os.makedirs(output_class_dir)
-            
-            print(f"Đang tiền xử lý ảnh lá loại {class_name}...")
-            
-            # Duyệt qua tất cả ảnh trong thư mục
-            image_files = [f for f in os.listdir(class_dir) 
-                           if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-            
-            for img_file in tqdm.tqdm(image_files, desc=f"Xử lý {class_name}"):
-                # Đường dẫn đầy đủ đến ảnh
-                img_path = os.path.join(class_dir, img_file)
-                
-                # Đường dẫn đầu ra
-                output_path = os.path.join(output_class_dir, img_file)
-                
-                # Tiền xử lý ảnh
-                try:
-                    preprocess_image_simple(img_path, output_path)
-                except Exception as e:
-                    print(f"Lỗi khi xử lý {img_path}: {e}")
+        # Create subdirectories if needed
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        
+        try:
+            # Process image
+            preprocess_image(img_path, out_path)
+        except Exception as e:
+            print(f"Error processing {img_path}: {e}")
     
-    print(f"Đã hoàn thành tiền xử lý cho {len(os.listdir(raw_data_dir))} loại lá.")
+    print("Image preprocessing completed!")
+
+if __name__ == "__main__":
+    # Example usage
+    input_dir = "data/raw"
+    output_dir = "data/processed"
+    batch_process(input_dir, output_dir)

@@ -1,222 +1,188 @@
-import pickle
 import numpy as np
 import cv2
-import os
-from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
-from .preprocess import preprocess_image_simple as preprocess_image
-from .feature_extraction import extract_all_features, load_deep_model
+from src.preprocess import preprocess_image
+from src.feature_extraction import extract_features
 
-def load_feature_database(database_file):
-    """Tải cơ sở dữ liệu đặc trưng từ file"""
-    try:
-        with open(database_file, 'rb') as f:
-            feature_database = pickle.load(f)
-        return feature_database
-    except Exception as e:
-        print(f"Lỗi khi tải cơ sở dữ liệu: {e}")
-        return None
+class LeafRetrieval:
+    def __init__(self, database):
+        """Initialize retrieval system with a database"""
+        self.database = database
+    
+    def euclidean_distance(self, feature1, feature2):
+        """Calculate Euclidean distance between feature vectors"""
+        return np.sqrt(np.sum((feature1 - feature2) ** 2))
+    
+    def cosine_distance(self, feature1, feature2):
+        """Calculate cosine distance between feature vectors"""
+        dot_product = np.dot(feature1, feature2)
+        norm1 = np.linalg.norm(feature1)
+        norm2 = np.linalg.norm(feature2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 1.0  # Maximum distance if either vector is zero
+        
+        return 1.0 - (dot_product / (norm1 * norm2))
+    
+    def chi_square_distance(self, feature1, feature2):
+        """Calculate chi-square distance between feature vectors (good for histograms)"""
+        # Add small epsilon to avoid division by zero
+        epsilon = 1e-10
+        
+        # Compute chi-square distance
+        return 0.5 * np.sum(((feature1 - feature2) ** 2) / (feature1 + feature2 + epsilon))
+    
+    def manhattan_distance(self, feature1, feature2):
+        """Calculate Manhattan (L1) distance between feature vectors"""
+        return np.sum(np.abs(feature1 - feature2))
+    
+    def weighted_distance(self, feature1, feature2, weights=None):
+        """Calculate weighted distance with customizable weights for different feature types"""
+        # Default weights if none provided (equal weighting)
+        if weights is None:
+            # Assuming the feature vector structure from feature_extraction.py:
+            # [color_feats(94), shape_feats(15), texture_feats(~26), vein_feats(~81), edge_feats(20)]
+            weights = np.ones(feature1.shape)
+        
+        # Calculate weighted Euclidean distance
+        return np.sqrt(np.sum(weights * ((feature1 - feature2) ** 2)))
+    
+    def retrieve_similar_images(self, query_image_path, n=3, metric='euclidean', preprocess=True):
+        """Retrieve n most similar images to the query image"""
+        # Check if database is loaded
+        if not self.database.is_built:
+            raise ValueError("Database not built or loaded!")
+        
+        # Preprocess image if required
+        if preprocess:
+            # Preprocess the query image (without saving)
+            processed_image = preprocess_image(query_image_path)
+        else:
+            # Just read the image (assuming it's already preprocessed)
+            processed_image = cv2.imread(query_image_path)
+        
+        if processed_image is None:
+            raise ValueError(f"Could not read or process query image: {query_image_path}")
+        
+        # Extract features from query image
+        query_features = extract_features(processed_image)
+        
+        # Calculate distances to all images in the database
+        distances = []
+        
+        # Choose distance metric
+        if metric == 'euclidean':
+            distance_func = self.euclidean_distance
+        elif metric == 'cosine':
+            distance_func = self.cosine_distance
+        elif metric == 'chi_square':
+            distance_func = self.chi_square_distance
+        elif metric == 'manhattan':
+            distance_func = self.manhattan_distance
+        else:
+            raise ValueError(f"Unsupported distance metric: {metric}")
+        
+        # Calculate distances
+        for i in range(self.database.size()):
+            db_features = self.database.get_feature_vector(i)
+            distance = distance_func(query_features, db_features)
+            distances.append((i, distance))
+        
+        # Sort by distance (ascending)
+        distances.sort(key=lambda x: x[1])
+        
+        # Get top n matches
+        top_matches = []
+        for i in range(min(n, len(distances))):
+            idx, dist = distances[i]
+            top_matches.append({
+                'index': idx,
+                'distance': dist,
+                'path': self.database.get_image_path(idx),
+                'label': self.database.get_label(idx),
+                'similarity': 1.0 / (1.0 + dist)  # Convert distance to similarity score
+            })
+        
+        return top_matches
+    
+    def retrieve_with_multiple_metrics(self, query_image_path, n=3, preprocess=True):
+        """Retrieve similar images using an ensemble of distance metrics"""
+        # Check if database is loaded
+        if not self.database.is_built:
+            raise ValueError("Database not built or loaded!")
+        
+        # Get results from different metrics
+        euclidean_results = self.retrieve_similar_images(query_image_path, n=n, metric='euclidean', preprocess=preprocess)
+        cosine_results = self.retrieve_similar_images(query_image_path, n=n, metric='cosine', preprocess=False)  # Skip preprocessing for subsequent calls
+        chi_square_results = self.retrieve_similar_images(query_image_path, n=n, metric='chi_square', preprocess=False)
+        
+        # Combine results using rank aggregation (Borda count)
+        # First, create a dictionary to store points for each image
+        points = {}
+        
+        # Assign points based on rank
+        for i, result in enumerate(euclidean_results):
+            idx = result['index']
+            points[idx] = points.get(idx, 0) + (n - i)
+        
+        for i, result in enumerate(cosine_results):
+            idx = result['index']
+            points[idx] = points.get(idx, 0) + (n - i)
+        
+        for i, result in enumerate(chi_square_results):
+            idx = result['index']
+            points[idx] = points.get(idx, 0) + (n - i)
+        
+        # Sort images by points
+        sorted_indices = sorted(points.keys(), key=lambda idx: points[idx], reverse=True)
+        
+        # Get top n matches
+        top_matches = []
+        for i in range(min(n, len(sorted_indices))):
+            idx = sorted_indices[i]
+            top_matches.append({
+                'index': idx,
+                'points': points[idx],
+                'path': self.database.get_image_path(idx),
+                'label': self.database.get_label(idx),
+                'similarity': points[idx] / (3 * n)  # Normalize to [0,1]
+            })
+        
+        return top_matches
+    
+    def retrieve_by_label(self, query_label, n=3):
+        """Retrieve n random images with the specified label"""
+        # Check if database is loaded
+        if not self.database.is_built:
+            raise ValueError("Database not built or loaded!")
+        
+        # Find all indices with the matching label
+        matching_indices = [i for i in range(self.database.size()) if self.database.get_label(i) == query_label]
+        
+        # Shuffle to randomize selection
+        np.random.shuffle(matching_indices)
+        
+        # Get top n matches
+        top_matches = []
+        for i in range(min(n, len(matching_indices))):
+            idx = matching_indices[i]
+            top_matches.append({
+                'index': idx,
+                'path': self.database.get_image_path(idx),
+                'label': self.database.get_label(idx),
+                'similarity': 1.0  # Perfect match for label-based query
+            })
+        
+        return top_matches
 
-def compute_weighted_similarity(query_features, database_features, weights=[0.7, 0.3]):
-    """Tính độ tương đồng kết hợp giữa nhiều phương pháp đo độ tương đồng"""
-    # Tính độ tương đồng cosine
-    cosine_sims = cosine_similarity([query_features], database_features)[0]
+if __name__ == "__main__":
+    # Example usage
+    from src.database import LeafDatabase
     
-    # Tính khoảng cách Euclidean và chuyển thành độ tương đồng
-    euclidean_dists = euclidean_distances([query_features], database_features)[0]
-    max_dist = np.max(euclidean_dists) if np.max(euclidean_dists) > 0 else 1
-    euclidean_sims = 1 - (euclidean_dists / max_dist)
+    db = LeafDatabase()
+    db.load("models/feature_database.pkl")
     
-    # Kết hợp các độ tương đồng với trọng số
-    similarities = weights[0] * cosine_sims + weights[1] * euclidean_sims
+    retrieval = LeafRetrieval(db)
+    results = retrieval.retrieve_similar_images("test_images/test1.JPG", n=3)
     
-    return similarities
-
-def compute_similarity_per_feature_type(query_features, database_features, feature_sections):
-    """Tính độ tương đồng cho từng loại đặc trưng riêng biệt"""
-    start_idx = 0
-    section_similarities = {}
-    
-    for section_name, section_length in feature_sections.items():
-        # Trích xuất phần đặc trưng tương ứng
-        query_section = query_features[start_idx:start_idx + section_length]
-        db_sections = database_features[:, start_idx:start_idx + section_length]
-        
-        # Tính độ tương đồng cho loại đặc trưng này
-        section_sims = cosine_similarity([query_section], db_sections)[0]
-        section_similarities[section_name] = section_sims
-        
-        # Di chuyển đến phần tiếp theo
-        start_idx += section_length
-    
-    return section_similarities
-
-def filter_by_shape(similarities_by_type, threshold=0.7):
-    """Lọc kết quả dựa trên độ tương đồng hình dạng"""
-    shape_sims = similarities_by_type.get('shape', np.array([]))
-    if len(shape_sims) == 0:
-        return np.ones(similarities_by_type.get(list(similarities_by_type.keys())[0], np.array([])).shape, dtype=bool)
-    
-    # Chỉ giữ lại các mẫu có độ tương đồng hình dạng vượt ngưỡng
-    return shape_sims >= threshold
-
-def find_similar_images_improved(query_image_path, feature_database, top_k=3, 
-                                use_deep_features=True, 
-                                model_type='resnet', 
-                                similarity_weights=[0.7, 0.3],
-                                feature_weights=None):
-    """Tìm k ảnh tương tự nhất với ảnh truy vấn sử dụng phương pháp cải tiến"""
-    # Tải mô hình CNN nếu cần
-    deep_model = None
-    if use_deep_features:
-        deep_model = load_deep_model(model_type)
-    
-    # Tiền xử lý ảnh truy vấn với phương pháp cải tiến
-    processed_img = preprocess_image(query_image_path)
-    
-    if processed_img is None:
-        print(f"Không thể xử lý ảnh truy vấn: {query_image_path}")
-        return []
-    
-    # Trích xuất đặc trưng từ ảnh truy vấn đã được tiền xử lý
-    query_features = extract_all_features(processed_img, deep_model, model_type)
-    
-    # Tính độ tương đồng với tất cả ảnh trong cơ sở dữ liệu
-    database_features = feature_database['features']
-    
-    # Nếu cơ sở dữ liệu có thông tin về phần của vector đặc trưng
-    if 'feature_sections' in feature_database:
-        feature_sections = feature_database['feature_sections']
-        
-        # Tính độ tương đồng theo từng loại đặc trưng
-        similarities_by_type = compute_similarity_per_feature_type(
-            query_features, database_features, feature_sections)
-        
-        # Lọc kết quả dựa trên độ tương đồng hình dạng
-        shape_filter = filter_by_shape(similarities_by_type, threshold=0.65)
-        
-        # Tính toán độ tương đồng tổng hợp với trọng số động
-        if feature_weights is None:
-            # Trọng số mặc định
-            feature_weights = {
-                'shape': 0.35,      # Hình dạng
-                'texture': 0.10,    # Kết cấu
-                'color': 0.15,      # Màu sắc
-                'vein': 0.25,       # Gân lá
-                'deep': 0.15        # Deep features
-            }
-        
-        # Kết hợp các đo lường tương đồng với trọng số
-        weighted_similarities = np.zeros(database_features.shape[0])
-        for feature_type, similarity in similarities_by_type.items():
-            if feature_type in feature_weights:
-                weighted_similarities += similarity * feature_weights[feature_type]
-        
-        # Áp dụng bộ lọc hình dạng
-        filtered_similarities = np.copy(weighted_similarities)
-        filtered_similarities[~shape_filter] *= 0.5  # Giảm 50% điểm cho những mẫu không đạt ngưỡng hình dạng
-    else:
-        # Phương pháp dự phòng: tính độ tương đồng tổng thể nếu không có thông tin phần
-        weighted_similarities = compute_weighted_similarity(
-            query_features, database_features, similarity_weights)
-        filtered_similarities = weighted_similarities
-    
-    # Sắp xếp theo độ tương đồng giảm dần
-    indices = np.argsort(filtered_similarities)[::-1][:top_k]
-    
-    # Tạo danh sách kết quả
-    results = []
-    for idx in indices:
-        results.append({
-            'image_path': feature_database['file_paths'][idx],
-            'similarity': filtered_similarities[idx],
-            'label': feature_database['labels'][idx]
-        })
-    
-    return results
-
-def analyze_similar_images(query_image_path, similar_images, output_dir=None):
-    """Phân tích chi tiết sự giống nhau giữa ảnh truy vấn và các ảnh tương tự"""
-    # Đọc ảnh truy vấn
-    query_img = cv2.imread(query_image_path)
-    if query_img is None:
-        print(f"Không thể đọc ảnh truy vấn: {query_image_path}")
-        return
-    
-    query_img = cv2.cvtColor(query_img, cv2.COLOR_BGR2RGB)
-    
-    # So sánh từng ảnh tương tự
-    for i, result in enumerate(similar_images):
-        # Đọc ảnh tương tự
-        similar_img_path = result['image_path']
-        similar_img = cv2.imread(similar_img_path)
-        if similar_img is None:
-            print(f"Không thể đọc ảnh tương tự: {similar_img_path}")
-            continue
-        
-        similar_img = cv2.cvtColor(similar_img, cv2.COLOR_BGR2RGB)
-        
-        # Resize ảnh nếu kích thước khác nhau
-        if query_img.shape[:2] != similar_img.shape[:2]:
-            similar_img = cv2.resize(similar_img, (query_img.shape[1], query_img.shape[0]))
-        
-        # Phân tích hình dạng
-        query_gray = cv2.cvtColor(query_img, cv2.COLOR_RGB2GRAY)
-        similar_gray = cv2.cvtColor(similar_img, cv2.COLOR_RGB2GRAY)
-        
-        # Phân ngưỡng để lấy hình dạng
-        _, query_binary = cv2.threshold(query_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        _, similar_binary = cv2.threshold(similar_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
-        # Tìm contour
-        query_contours, _ = cv2.findContours(query_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        similar_contours, _ = cv2.findContours(similar_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Vẽ contour lên ảnh
-        query_with_contour = query_img.copy()
-        similar_with_contour = similar_img.copy()
-        
-        if query_contours:
-            largest_query_contour = max(query_contours, key=cv2.contourArea)
-            cv2.drawContours(query_with_contour, [largest_query_contour], 0, (255, 0, 0), 2)
-        
-        if similar_contours:
-            largest_similar_contour = max(similar_contours, key=cv2.contourArea)
-            cv2.drawContours(similar_with_contour, [largest_similar_contour], 0, (255, 0, 0), 2)
-        
-        # Tạo ảnh kết quả
-        result_img = np.hstack((query_with_contour, similar_with_contour))
-        
-        # Hiển thị hoặc lưu kết quả
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, f"compare_{i+1}_{result['label']}.jpg")
-            cv2.imwrite(output_path, cv2.cvtColor(result_img, cv2.COLOR_RGB2BGR))
-            print(f"Đã lưu ảnh so sánh: {output_path}")
-        
-        # Tính toán một số chỉ số tương đồng
-        if query_contours and similar_contours:
-            # So sánh hình dạng với cv2.matchShapes
-            shape_distance = cv2.matchShapes(largest_query_contour, largest_similar_contour, 
-                                            cv2.CONTOURS_MATCH_I3, 0)
-            print(f"Khoảng cách hình dạng với {result['label']}: {shape_distance:.5f}")
-            
-            # So sánh histogram màu sắc
-            query_hsv = cv2.cvtColor(query_img, cv2.COLOR_RGB2HSV)
-            similar_hsv = cv2.cvtColor(similar_img, cv2.COLOR_RGB2HSV)
-            
-            h_bins = 50
-            s_bins = 60
-            histSize = [h_bins, s_bins]
-            h_ranges = [0, 180]
-            s_ranges = [0, 256]
-            ranges = h_ranges + s_ranges
-            channels = [0, 1]
-            
-            query_hist = cv2.calcHist([query_hsv], channels, None, histSize, ranges, accumulate=False)
-            cv2.normalize(query_hist, query_hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
-            
-            similar_hist = cv2.calcHist([similar_hsv], channels, None, histSize, ranges, accumulate=False)
-            cv2.normalize(similar_hist, similar_hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
-            
-            hist_comparison = cv2.compareHist(query_hist, similar_hist, cv2.HISTCMP_CORREL)
-            print(f"Tương quan histogram với {result['label']}: {hist_comparison:.5f}")
+    for i, result in enumerate(results):
+        print(f"Match {i+1}: {result['label']} (Similarity: {result['similarity']:.4f})")

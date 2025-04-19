@@ -1,118 +1,113 @@
-# Hướng Dẫn Thiết Lập Dự Án
+# Hệ thống Cơ sở dữ liệu và Tìm kiếm Ảnh Lá Cây
 
-## Yêu Cầu Hệ Thống
+Dự án này xây dựng một hệ thống cơ sở dữ liệu đa phương tiện để lưu trữ và tìm kiếm ảnh lá cây, với khả năng xử lý 11 loại lá cây khác nhau.
 
-- Python 3.12 hoặc cao hơn
-- Git
+## Yêu cầu
 
-## Thiết Lập Môi Trường Phát Triển
+- Python 3.12 trở lên
+- Các thư viện: opencv-python, numpy, scikit-image, scikit-learn, matplotlib, joblib, tqdm
 
-### Cài Đặt uv
+## Cài đặt
 
-`uv` là công cụ cài đặt và quản lý gói Python nhanh mà chúng ta sử dụng để quản lý các phụ thuộc.
-
-#### Trên macOS/Linux:
+Sử dụng uv để quản lý môi trường Python:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Cài đặt uv (nếu chưa có)
+curl -sSf https://install.determinate.systems/uv | python -
+
+# Khởi tạo môi trường với uv
+uv venv
+
+# Kích hoạt môi trường
+source .venv/bin/activate  # Linux/Mac
+# hoặc
+.venv\Scripts\activate  # Windows
+
+# Cài đặt các thư viện phụ thuộc
+uv pip install -r requirements.txt
 ```
 
-#### Trên Windows:
+## Sử dụng
 
-```powershell
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
+### 1. Tiền xử lý ảnh
 
-#### Kiểm tra cài đặt:
+Tiến hành tiền xử lý ảnh từ thư mục data/raw và lưu kết quả vào thư mục data/processed:
 
 ```bash
-uv --version
+uv run main.py --preprocess
 ```
 
-### Cài Đặt Các Gói Phụ Thuộc
+### 2. Xây dựng cơ sở dữ liệu
 
-1. Sao chép kho lưu trữ (nếu bạn chưa làm):
-
-   ```bash
-   git clone <repository-url>
-   cd csdldpt
-   ```
-
-2. Tạo và kích hoạt môi trường ảo bằng uv:
-
-   ```bash
-   uv venv
-   source .venv/bin/activate  # Trên Linux/macOS
-   # Hoặc trên Windows:
-   # .venv\Scripts\activate
-   ```
-
-3. Cài đặt các phụ thuộc từ requirements.txt:
-   ```bash
-   uv pip install -r requirements.txt
-   ```
-
-## Chạy Dự Án
-
-Dự án là một hệ thống tìm kiếm ảnh lá cây tương tự với ba chế độ hoạt động chính:
-
-### 1. Tiền Xử Lý Ảnh
-
-Chạy lệnh sau để tiền xử lý tất cả ảnh:
+Xây dựng cơ sở dữ liệu các đặc trưng từ ảnh đã tiền xử lý:
 
 ```bash
-uv run python main.py --mode preprocess
+uv run main.py --build
 ```
 
-Lệnh này sẽ xử lý tất cả ảnh trong data/raw và lưu kết quả vào data/processed, giữ nguyên cấu trúc thư mục.
+### 3. Tìm kiếm ảnh tương tự
 
-### 2. Xây Dựng Cơ Sở Dữ Liệu Đặc Trưng
-
-Để xây dựng cơ sở dữ liệu mà không sử dụng đặc trưng học sâu (nhanh hơn):
+Tìm kiếm ảnh tương tự dựa trên một ảnh query:
 
 ```bash
-uv run python main.py --mode train
+uv run main.py --retrieve --query test_images/test1.JPG
 ```
 
-Hoặc để xây dựng cơ sở dữ liệu có sử dụng đặc trưng học sâu (chính xác hơn):
+Tùy chọn:
+
+- `--n`: Số lượng ảnh tương tự cần tìm (mặc định: 3)
+- `--metric`: Phương pháp đo khoảng cách (euclidean, cosine, chi_square, manhattan, ensemble)
+
+### 4. Xử lý tất cả ảnh thử nghiệm
+
+Tiến hành tìm kiếm cho tất cả ảnh trong thư mục test_images:
 
 ```bash
-uv run python main.py --mode train --use_deep
+uv run main.py --test_all
 ```
 
-Quá trình này sẽ trích xuất đặc trưng từ tất cả ảnh đã xử lý và lưu vào models/feature_database.pkl.
+## Các thành phần của hệ thống
 
-### 3. Tìm Kiếm Ảnh Tương Tự
+### Tiền xử lý ảnh (`src/preprocess.py`)
 
-Để tìm kiếm ảnh tương tự với một ảnh truy vấn:
+Module này thực hiện các bước tiền xử lý ảnh lá cây:
 
-```bash
-uv run python main.py --mode search --query test_images/test1.jpg
-```
+- Loại bỏ nền ảnh sử dụng thuật toán GrabCut
+- Làm nổi bật các chi tiết của lá như gân lá, viền lá
+- Thay đổi kích thước ảnh về 256x256 pixels
 
-Để sử dụng đặc trưng học sâu khi tìm kiếm (đảm bảo CSDL cũng được xây dựng với đặc trưng học sâu):
+### Trích xuất đặc trưng (`src/feature_extraction.py`)
 
-```bash
-uv run python main.py --mode search --query test_images/test1.jpg --use_deep
-```
+Module này trích xuất các đặc trưng từ ảnh lá cây:
 
-Để tìm nhiều hơn 3 ảnh tương tự:
+- Đặc trưng màu sắc: histogram HSV
+- Đặc trưng hình dạng: Hu moments, tỉ lệ diện tích/chu vi, v.v.
+- Đặc trưng kết cấu: Local Binary Patterns (LBP)
+- Đặc trưng gân lá: HoG trên ảnh gân lá
+- Đặc trưng viền lá: Phân tích độ cong của viền lá
 
-```bash
-uv run python main.py --mode search --query test_images/test1.jpg --top_k 5
-```
+### Cơ sở dữ liệu (`src/database.py`)
 
-Kết quả tìm kiếm sẽ được hiển thị trên màn hình và lưu vào thư mục results.
+Module này quản lý việc lưu trữ và truy xuất đặc trưng của ảnh lá:
 
-### 4. Chạy Tất Cả Các Bước Cùng Lúc
+- Xây dựng cơ sở dữ liệu từ thư mục ảnh
+- Lưu và nạp cơ sở dữ liệu với joblib
 
-Để chạy toàn bộ quy trình từ tiền xử lý đến tìm kiếm:
+### Tìm kiếm tương tự (`src/retrieval.py`)
 
-```bash
-uv run python main.py --mode all --query test_images/test1.jpg --use_deep
-```
+Module này thực hiện tìm kiếm ảnh tương tự:
 
-### Các Tham Số Bổ Sung
+- Hỗ trợ nhiều phương pháp đo khoảng cách: Euclidean, Cosine, Chi-square, Manhattan
+- Hỗ trợ kết hợp nhiều phương pháp (ensemble)
 
-- `--top_k`: Số lượng ảnh tương tự muốn trả về (mặc định: 3)
-- `--result_dir`: Thư mục lưu kết quả (mặc định: results)
+### Hiển thị kết quả (`src/visualization.py`)
+
+Module này tạo ra các hình ảnh trực quan:
+
+- Hiển thị ảnh query và các ảnh tương tự nhất
+- Hiển thị quá trình tiền xử lý
+- Hiển thị trực quan các đặc trưng đã trích xuất
+
+## Kết quả
+
+Khi chạy tìm kiếm, các kết quả sẽ được lưu vào thư mục `results/` dưới dạng ảnh, hiển thị ảnh query và 3 ảnh tương tự nhất cùng với độ tương đồng.

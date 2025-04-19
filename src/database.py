@@ -1,140 +1,166 @@
 import os
 import pickle
 import numpy as np
-import cv2
 from tqdm import tqdm
-from .preprocess import preprocess_image_simple as preprocess_image
-from .feature_extraction import extract_all_features, load_deep_model
+import joblib
+from src.feature_extraction import extract_features
+from src.preprocess import preprocess_image
+import cv2
 
-def compute_feature_lengths(image_rgb, deep_model=None, model_type='resnet'):
-    """Tính toán độ dài của từng phần trong vector đặc trưng"""
-    # Tạo ảnh xám và ảnh nhị phân
-    gray_image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced_gray = clahe.apply(gray_image)
-    _, binary_otsu = cv2.threshold(enhanced_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    binary_adaptive = cv2.adaptiveThreshold(enhanced_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                           cv2.THRESH_BINARY_INV, 11, 2)
-    binary_image = cv2.bitwise_or(binary_otsu, binary_adaptive)
+class LeafDatabase:
+    def __init__(self):
+        self.features = []
+        self.image_paths = []
+        self.labels = []
+        self.is_built = False
     
-    # Áp dụng phép mở và đóng để loại bỏ nhiễu
-    kernel = np.ones((3, 3), np.uint8)
-    binary_image = cv2.morphologyEx(binary_image, cv2.MORPH_OPEN, kernel, iterations=1)
-    binary_image = cv2.morphologyEx(binary_image, cv2.MORPH_CLOSE, kernel, iterations=2)
-    
-    # Tính độ dài từng phần
-    from .feature_extraction import (extract_shape_features, 
-                                            extract_texture_features,
-                                            extract_color_features,
-                                            extract_vein_features,
-                                            extract_deep_features)
-    
-    shape_feats = extract_shape_features(binary_image)
-    texture_feats = extract_texture_features(gray_image)
-    color_feats = extract_color_features(image_rgb)
-    vein_feats = extract_vein_features(gray_image)
-    
-    feature_sections = {
-        'shape': len(shape_feats),
-        'texture': len(texture_feats),
-        'color': len(color_feats),
-        'vein': len(vein_feats)
-    }
-    
-    if deep_model is not None:
-        deep_feats = extract_deep_features(image_rgb, deep_model)
-        feature_sections['deep'] = len(deep_feats)
-    
-    return feature_sections
-
-def build_feature_database_improved(image_folder, output_file, use_deep_features=True, model_type='resnet'):
-    """Xây dựng cơ sở dữ liệu đặc trưng từ thư mục ảnh với các cải tiến"""
-    # Tạo từ điển lưu trữ đặc trưng
-    feature_database = {
-        'file_paths': [],
-        'features': [],
-        'labels': [],
-        'metadata': {}
-    }
-    
-    # Tải mô hình CNN nếu cần
-    deep_model = None
-    if use_deep_features:
-        print(f"Đang tải mô hình {model_type}...")
-        deep_model = load_deep_model(model_type)
-    
-    # Duyệt qua các thư mục (mỗi thư mục là một loại lá)
-    print(f"Đang xây dựng cơ sở dữ liệu từ {image_folder}...")
-    
-    feature_sections = None
-    
-    for label in os.listdir(image_folder):
-        class_folder = os.path.join(image_folder, label)
+    def build_from_directory(self, input_dir):
+        """Build database from a directory of processed images"""
+        # Get all image files
+        image_files = []
+        labels = []
         
-        if os.path.isdir(class_folder):
-            print(f"Đang xử lý lá loại: {label}")
-            
-            # Duyệt qua từng ảnh trong thư mục
-            image_files = [f for f in os.listdir(class_folder) 
-                           if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-            
-            for filename in tqdm(image_files, desc=f"Xử lý {label}"):
-                image_path = os.path.join(class_folder, filename)
+        for root, _, files in os.walk(input_dir):
+            for file in files:
+                if file.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
+                    # Full path to the image
+                    img_path = os.path.join(root, file)
+                    
+                    # Extract label from directory structure
+                    label = os.path.basename(os.path.dirname(img_path))
+                    
+                    image_files.append(img_path)
+                    labels.append(label)
+        
+        print(f"Found {len(image_files)} images for database.")
+        
+        # Extract features from each image
+        features = []
+        valid_labels = []
+        valid_paths = []
+        
+        for i, img_path in enumerate(tqdm(image_files, desc="Building database")):
+            try:
+                # Read image
+                image = cv2.imread(img_path)
                 
-                try:
-                    # Tiền xử lý ảnh với phương pháp cải tiến
-                    processed_img = preprocess_image(image_path)
-                    
-                    if processed_img is None:
-                        print(f"Không thể xử lý ảnh: {image_path}")
-                        continue
-                    
-                    # Trích xuất đặc trưng
-                    features = extract_all_features(processed_img, deep_model, model_type)
-                    
-                    # Nếu chưa có thông tin về phần của vector đặc trưng, tính toán và lưu lại
-                    if feature_sections is None:
-                        feature_sections = compute_feature_lengths(processed_img, deep_model, model_type)
-                        feature_database['feature_sections'] = feature_sections
-                        print(f"Độ dài của các phần vector đặc trưng: {feature_sections}")
-                    
-                    # Thêm vào cơ sở dữ liệu
-                    feature_database['file_paths'].append(image_path)
-                    feature_database['features'].append(features)
-                    feature_database['labels'].append(label)
-                    
-                except Exception as e:
-                    print(f"Lỗi khi xử lý {image_path}: {e}")
+                if image is None:
+                    print(f"Warning: Could not read image {img_path}")
+                    continue
+                
+                # Extract features
+                feature_vector = extract_features(image)
+                
+                # Store features and metadata
+                features.append(feature_vector)
+                valid_labels.append(labels[i])
+                valid_paths.append(img_path)
+            except Exception as e:
+                print(f"Error processing {img_path}: {e}")
+        
+        # Store in object
+        self.features = np.array(features)
+        self.image_paths = valid_paths
+        self.labels = valid_labels
+        self.is_built = True
+        
+        print(f"Database built with {len(self.features)} feature vectors.")
+        return self
     
-    # Thêm metadata
-    feature_database['metadata']['use_deep_features'] = use_deep_features
-    feature_database['metadata']['model_type'] = model_type if use_deep_features else None
-    feature_database['metadata']['num_classes'] = len(set(feature_database['labels']))
-    feature_database['metadata']['num_samples'] = len(feature_database['file_paths'])
-    feature_database['metadata']['classes'] = list(set(feature_database['labels']))
+    def add_image(self, image_path, label=None):
+        """Add a single image to the database"""
+        try:
+            # Read and process image
+            image = cv2.imread(image_path)
+            
+            if image is None:
+                print(f"Warning: Could not read image {image_path}")
+                return False
+            
+            # Extract features
+            feature_vector = extract_features(image)
+            
+            # Determine label if not provided
+            if label is None:
+                label = os.path.basename(os.path.dirname(image_path))
+            
+            # Add to database
+            self.features = np.vstack([self.features, feature_vector]) if len(self.features) > 0 else np.array([feature_vector])
+            self.image_paths.append(image_path)
+            self.labels.append(label)
+            
+            return True
+        except Exception as e:
+            print(f"Error adding image {image_path}: {e}")
+            return False
     
-    # Tính số lượng mẫu cho mỗi lớp
-    class_counts = {}
-    for label in feature_database['labels']:
-        if label not in class_counts:
-            class_counts[label] = 0
-        class_counts[label] += 1
-    feature_database['metadata']['class_counts'] = class_counts
+    def save(self, output_path):
+        """Save database to disk"""
+        if not self.is_built:
+            print("Database not built yet!")
+            return False
+        
+        # Create output directory if needed
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # Create database object for saving
+        database = {
+            'features': self.features,
+            'image_paths': self.image_paths,
+            'labels': self.labels
+        }
+        
+        # Save using joblib
+        joblib.dump(database, output_path)
+        print(f"Database saved to {output_path}")
+        return True
     
-    # Chuyển danh sách đặc trưng thành mảng numpy
-    feature_database['features'] = np.array(feature_database['features'])
+    def load(self, input_path):
+        """Load database from disk"""
+        if not os.path.exists(input_path):
+            print(f"Database file not found: {input_path}")
+            return False
+        
+        try:
+            # Load database object
+            database = joblib.load(input_path)
+            
+            # Extract data
+            self.features = database['features']
+            self.image_paths = database['image_paths']
+            self.labels = database['labels']
+            self.is_built = True
+            
+            print(f"Database loaded with {len(self.features)} feature vectors.")
+            return True
+        except Exception as e:
+            print(f"Error loading database: {e}")
+            return False
     
-    # Tạo thư mục cha nếu cần
-    output_dir = os.path.dirname(output_file)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    def get_feature_vector(self, index):
+        """Get feature vector at specific index"""
+        if not self.is_built or index >= len(self.features):
+            return None
+        return self.features[index]
     
-    # Lưu cơ sở dữ liệu
-    with open(output_file, 'wb') as f:
-        pickle.dump(feature_database, f)
+    def get_image_path(self, index):
+        """Get image path at specific index"""
+        if not self.is_built or index >= len(self.image_paths):
+            return None
+        return self.image_paths[index]
     
-    print(f"Đã xây dựng cơ sở dữ liệu với {len(feature_database['file_paths'])} ảnh")
-    print(f"Đã lưu cơ sở dữ liệu vào: {output_file}")
-    print(f"Thống kê lớp: {class_counts}")
+    def get_label(self, index):
+        """Get label at specific index"""
+        if not self.is_built or index >= len(self.labels):
+            return None
+        return self.labels[index]
     
-    return feature_database
+    def size(self):
+        """Get number of images in database"""
+        return len(self.features) if self.is_built else 0
+
+if __name__ == "__main__":
+    # Example usage
+    db = LeafDatabase()
+    db.build_from_directory("data/processed")
+    db.save("models/feature_database.pkl")

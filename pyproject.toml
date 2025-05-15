@@ -5,4 +5,7 @@ description = "Hệ thống cơ sở dữ liệu lưu trữ và tìm kiếm ản
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
-dependencies = []
+dependencies = [
+    "numpy>=2.2.5",
+    "opencv-python>=4.11.0.86",
+]

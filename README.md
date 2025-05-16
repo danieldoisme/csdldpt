@@ -90,9 +90,9 @@ The interactive web application allows you to upload a leaf image and find simil
 - **`main.py`**: Command-line interface for preprocessing, feature extraction, and search.
 - **`modules/preprocess_all_images.py`**: Script to batch preprocess all raw leaf images.
 - **`modules/extract_features.py`**: Script to batch extract features from all processed leaf images.
-- **`modules/search_leaves.py`**: Script to perform search similar images for one query image.
+- **`modules/search_leaves.py`**: Script to perform searching similar images for one query image.
 - **`src/preprocessing.py`**: Contains functions for image preprocessing tasks like resizing, segmentation, and enhancement.
-- **`src/feature_extraction.py`**: Contains functions to extract various features (shape, color, texture, vein) from leaf images.
+- **`src/feature_extraction.py`**: Contains functions to extract various features (shape, color, edge, vein) from leaf images.
 - **`src/search.py`**: Contains functions for calculating similarity and searching for matching leaves based on extracted features.
 - **`requirements.txt`**: Lists the Python dependencies for the project.
 - **`pyproject.toml`**: Project metadata and build system configuration.

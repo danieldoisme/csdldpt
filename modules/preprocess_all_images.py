@@ -69,7 +69,7 @@ def preprocess_all_images():
     
     # Print summary
     print("\n" + "="*50)
-    print(f"Processing Complete!")
+    print("Processing Complete!")
     print(f"Total images found: {total_images}")
     print(f"Successfully processed: {processed_images}")
     print(f"Errors: {len(errors)}")
@@ -80,6 +80,3 @@ def preprocess_all_images():
         print("\nErrors encountered:")
         for error in errors:
             print(f"  - {error}")
-
-if __name__ == "__main__":
-    preprocess_all_images()

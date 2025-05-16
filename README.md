@@ -2,6 +2,8 @@
 
 This project implements a system for preprocessing, feature extraction, and similarity search on leaf images. It includes a command-line interface for batch processing and a Streamlit web application for interactive search.
 
+#file:result_1.png
+
 ## Setup
 
 ### Prerequisites

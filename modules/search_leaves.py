@@ -3,7 +3,7 @@ import cv2
 import matplotlib.pyplot as plt
 from src.preprocessing import preprocess_leaf_image
 import glob 
-import numpy as np # Added for placeholder image in display_results
+import numpy as np
 
 def display_results(query_image_path, similar_images, output_path=None):
     """
@@ -29,8 +29,6 @@ def display_results(query_image_path, similar_images, output_path=None):
     # Adjust num_results to be at most the number of available similar_images + 1 for query
     1 + len(similar_images) if similar_images is not None and not similar_images.empty else 1
     # Ensure num_plots doesn't exceed a reasonable number for subplotting, e.g., 1 (query) + 3 (results)
-    # This was previously hardcoded to 4 subplots (1 query + 3 results)
-    # Let's make it dynamic up to a max, e.g., 5 (1 query + 4 results)
     max_display_results = 4 # Max similar results to display
     num_cols_display = 1 + min(len(similar_images) if similar_images is not None else 0, max_display_results)
 

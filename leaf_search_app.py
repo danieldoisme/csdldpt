@@ -159,8 +159,8 @@ if uploaded_file is not None:
                     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                     st.image(img)
                     st.caption(f"Match {i+1}: {row['tree_type']}\nDistance: {row['distance']:.3f}")
-                except:
-                    st.write(f"Could not load image: {img_path}")
+                except Exception as e:
+                    st.write(f"Could not load image: {img_path}. Error: {e}")
         
         # Show the results in a table
         st.subheader("Detailed Results")
@@ -199,8 +199,8 @@ else:
         plt.ylabel('Count')
         plt.xticks(rotation=45)
         st.pyplot(fig)
-    except:
-        st.write("Could not load dataset information. Please check if the features file exists.")
+    except Exception as e:
+        st.write(f"Could not load dataset information. Please check if the features file exists. Error: {e}")
 
 # Footer
 st.markdown("---")

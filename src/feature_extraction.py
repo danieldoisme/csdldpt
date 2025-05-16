@@ -178,7 +178,8 @@ def extract_edge_features(image):
     defects = None
     try:
         defects = cv2.convexityDefects(contour, hull_indices)
-    except:
+    except cv2.error as e:
+        print(f"Warning: Could not compute convexity defects: {e}")
         pass
         
     significant_concavities = 0

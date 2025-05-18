@@ -151,7 +151,7 @@ if uploaded_file is not None:
             col_idx = i % len(cols)
             with cols[col_idx]:
                 # Get the image path
-                img_path = os.path.join('data/stored_images/processed', row['tree_type'], row['image_name'])
+                img_path = os.path.join('data/stored_images/raw', row['tree_type'], row['image_name'])
                 
                 # Load and display image
                 try:

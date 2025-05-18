@@ -45,7 +45,7 @@ def display_results(query_image_path, similar_images, output_path=None):
     if similar_images is not None and not similar_images.empty:
         for i, (_, row) in enumerate(similar_images.head(max_display_results).iterrows(), 1):
             # Get the image path
-            img_path = os.path.join('data/stored_images/processed', row['tree_type'], row['image_name'])
+            img_path = os.path.join('data/stored_images/raw', row['tree_type'], row['image_name'])
             
             # Load and display image
             img = cv2.imread(img_path)

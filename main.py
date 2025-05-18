@@ -126,25 +126,9 @@ def search_command_args(args):
     else:
         print("\nDisplaying result image (close window to continue)...")
 
-    # Determine the path of the query image to display (original or processed)
-    query_image_to_display = args.query_image
-    if preprocess_query_image:
-        # process_and_search saves the processed image in "data/temp" if preprocess=True
-        # It returns the path to the processed image if preprocessing occurred, otherwise original path.
-        # For simplicity, let's assume process_and_search handles this detail or we reconstruct path.
-        # The `process_and_search` function in `src/search.py` saves the processed query
-        # image to `data/temp/processed_{filename}`.
-        temp_processed_query_path = os.path.join("data/temp", f"processed_{os.path.basename(args.query_image)}")
-        if os.path.exists(temp_processed_query_path):
-            query_image_to_display = temp_processed_query_path
-        else:
-            # Fallback if processed image not found where expected, use original.
-            # This might happen if process_and_search's internal saving changes.
-            print(f"Warning: Expected processed query image at {temp_processed_query_path} not found. Displaying original.")
-
 
     display_results(
-        query_image_to_display,
+        args.query_image, # Always use the original query image path for display
         similar_leaves,
         output_path=output_file_path # Pass None if no output path, display_results handles plt.show()
     )

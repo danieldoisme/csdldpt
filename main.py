@@ -224,24 +224,16 @@ def main_cli():
         
     args = parser.parse_args()
     
-    # ADD CONDITIONAL BACKEND SETTING HERE:
-    # If the command is 'search' and no output file is specified,
-    # let Matplotlib use its default interactive backend.
-    # Otherwise, use 'Agg'.
     if not (args.command == "search" and args.output is None):
         try:
             matplotlib.use('Agg')
         except Exception as e:
-            # It's unlikely for 'Agg' to fail, but good to catch potential issues.
             print(f"Warning: Could not set Matplotlib backend to 'Agg': {e}", file=sys.stderr)
-    # If it is the search command and no output is specified, we don't call matplotlib.use(),
-    # allowing it to pick a default interactive backend suitable for your OS (e.g., 'MacOSX' or 'TkAgg' on macOS).
-
+    
     # Handle cases for the search command specifically (argument validation)
     if args.command == "search":
         if not args.query_image and not args.process_search_dir:
             search_parser.error("A query_image path is required, or use --process-search-dir to process the search directory.")
-            # error() typically exits, so sys.exit(1) might not be reached.
 
     args.func(args)
 
